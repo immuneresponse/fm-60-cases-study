@@ -1389,7 +1389,7 @@ html[data-theme="light"] .pearl{border-color:rgba(154,107,22,.18)}
     <b>Roxy &amp; Vince</b>
     <span class="tutor-sub">she teaches · he suffers</span>
     <span class="tstat" id="tStat">idle</span>
-    <button class="pbtn" id="tutorClose" title="Close" aria-label="Close tutor" style="width:26px;height:26px;font-size:12px">&times;</button>
+    <button class="pbtn" id="tutorClose" title="Fold away (audio keeps playing)" aria-label="Fold tutor away, keep audio playing" style="width:26px;height:26px;font-size:12px">&times;</button>
   </div>
   <div class="tutor-ctrl">
     <button class="pbtn" id="tPrev" title="Previous line" aria-label="Previous line">&#9198;</button>
@@ -1426,6 +1426,8 @@ html[data-theme="light"] .pearl{border-color:rgba(154,107,22,.18)}
   }
 
   function loadCase(n){
+    if (n == null) return; // home view: leave the current track alone so audio keeps playing
+    const resume = !audio.paused && turns.length > 0;
     const c = CASES.find(x => x.num === n);
     turns = (c && c.tutor && c.tutor.turns) ? c.tutor.turns : [];
     loadedCase = n;
@@ -1447,6 +1449,7 @@ html[data-theme="light"] .pearl{border-color:rgba(154,107,22,.18)}
     listEl.querySelectorAll('.turn').forEach(el =>
       el.addEventListener('click', () => { playErr = null; playTurn(+el.dataset.i); }));
     paint();
+    if (resume && turns.length) playTurn(0); // switched cases mid-play: continue with the new case
   }
 
   let playErr = null;
@@ -1477,18 +1480,51 @@ html[data-theme="light"] .pearl{border-color:rgba(154,107,22,.18)}
     const tt = total();
     fill.style.width = (tt ? Math.min(100, elapsed() / tt * 100) : 0) + '%';
     const cur = listEl.querySelector('.turn.cur');
-    if (cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (cur && drawer.classList.contains('open')) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     const st = document.getElementById('tStat');
     if (st){
       if (playErr){ st.textContent = 'audio blocked — tap ▶'; st.classList.remove('live'); }
       else if (!audio.paused){ st.textContent = '▶ line ' + (i+1) + '/' + turns.length; st.classList.add('live'); }
       else { st.textContent = 'paused ' + (i+1) + '/' + turns.length; st.classList.remove('live'); }
     }
+    // mini player: visible when the drawer is folded away but a track is loaded
+    mPP.innerHTML = audio.paused ? '&#9654;' : '&#10074;&#10074;';
+    const showMini = !drawer.classList.contains('open') && turns.length > 0;
+    mini.style.display = showMini ? 'flex' : 'none';
+    if (showMini){
+      const cc = CASES.find(x => x.num === loadedCase);
+      mLbl.innerHTML = '<b>' + esc(cc ? ('Case ' + cc.num) : 'Tutor') + '</b>&nbsp;·&nbsp;' +
+        (audio.paused ? ('paused ' + (i+1) + '/' + turns.length) : ('▶ line ' + (i+1) + '/' + turns.length));
+    }
   }
+
+  /* persistent mini player: fold the drawer away, audio keeps going */
+  const miniStyle = document.createElement('style');
+  miniStyle.textContent = '#tutorMini{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:70;display:none;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--line-2);border-radius:999px;padding:7px 8px 7px 7px;box-shadow:0 14px 34px -12px rgba(0,0,0,.75);max-width:min(600px,93vw)}#tutorMini .lbl{font-family:var(--sans);font-size:11.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38vw}#tutorMini .lbl b{color:var(--ink);font-weight:600}';
+  document.head.appendChild(miniStyle);
+  const mini = document.createElement('div');
+  mini.id = 'tutorMini';
+  mini.innerHTML = '<button class="pbtn big" id="mPP" title="Play / pause" aria-label="Play or pause" style="width:34px;height:34px">&#9654;</button><span class="lbl" id="mLbl">Tutor</span><button class="pbtn" id="mOpen" title="Open transcript" aria-label="Open transcript" style="width:34px;height:34px;font-size:13px">&#9776;</button>';
+  document.body.appendChild(mini);
+  const mPP = document.getElementById('mPP'), mLbl = document.getElementById('mLbl');
+  mPP.addEventListener('click', () => {
+    playErr = null;
+    if (audio.paused){
+      if (i < 0) playTurn(0);
+      else { audio.playbackRate = rate; audio.play().catch(e => { playErr = (e && e.message) || 'blocked'; paint(); }); paint(); }
+    } else audio.pause();
+  });
+  document.getElementById('mOpen').addEventListener('click', () => {
+    drawer.classList.add('open');
+    document.getElementById('tutorBtn').classList.add('on');
+    const nn = currentCase();
+    if (nn !== loadedCase) loadCase(nn);
+    paint();
+  });
 
   document.getElementById('tutorBtn').addEventListener('click', () => {
     const b = document.getElementById('tutorBtn');
-    if (drawer.classList.contains('open')){ drawer.classList.remove('open'); audio.pause(); b.classList.remove('on'); return; }
+    if (drawer.classList.contains('open')){ drawer.classList.remove('open'); b.classList.remove('on'); paint(); return; }
     b.classList.add('on');
     drawer.classList.add('open');
     const n = currentCase();
@@ -1500,8 +1536,9 @@ html[data-theme="light"] .pearl{border-color:rgba(154,107,22,.18)}
     }
   });
   document.getElementById('tutorClose').addEventListener('click', () => {
-    drawer.classList.remove('open'); audio.pause();
+    drawer.classList.remove('open');
     document.getElementById('tutorBtn').classList.remove('on');
+    paint(); // audio keeps playing — use the mini player to pause
   });
   pp.addEventListener('click', () => {
     if (!turns.length) return;
@@ -1527,9 +1564,9 @@ html[data-theme="light"] .pearl{border-color:rgba(154,107,22,.18)}
   rateBtn.textContent = String(rate).replace(/\.0$/, '') + '\u00d7';
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && drawer.classList.contains('open')){ drawer.classList.remove('open'); audio.pause(); document.getElementById('tutorBtn').classList.remove('on'); }
+    if (e.key === 'Escape' && drawer.classList.contains('open')){ drawer.classList.remove('open'); document.getElementById('tutorBtn').classList.remove('on'); paint(); }
   });
-  window.addEventListener('hashchange', () => { if (drawer.classList.contains('open')) loadCase(currentCase()); });
+  window.addEventListener('hashchange', () => { loadCase(currentCase()); });
 
   window.addEventListener('beforeprint', () => {
     document.querySelectorAll('details').forEach(d => { d.open = true; });
